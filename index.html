@@ -169,7 +169,12 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
     }
-    .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    body.background-motion-disabled::before { animation: none !important; opacity: 0.12 !important; }
+    body.background-motion-disabled .bubble { animation: none !important; opacity: 0 !important; }
+    body.reduced-motion .reveal { animation: none !important; opacity: 1 !important; transform: none !important; }
+    body.reduced-motion .pulse-ring { animation: none !important; box-shadow: none !important; }
+    body.reduced-motion .glass-card-hover { transition: none !important; }
+    .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 
     /* Vlastní stylování slideru */
     input[type=range] {
@@ -246,9 +251,9 @@
       <div class="flex items-center gap-3">
         <!-- Změna T tématu -->
         <div class="flex items-center gap-1 bg-slate-900/80 p-1.5 rounded-full border border-slate-700/80">
-          <button onclick="setTheme('cyan')" class="w-5 h-5 rounded-full bg-sky-400 hover:scale-110 transition-transform" title="Modrá"></button>
-          <button onclick="setTheme('emerald')" class="w-5 h-5 rounded-full bg-emerald-400 hover:scale-110 transition-transform" title="Smaragdová"></button>
-          <button onclick="setTheme('purple')" class="w-5 h-5 rounded-full bg-purple-400 hover:scale-110 transition-transform" title="Fialová"></button>
+          <button data-theme-button="cyan" onclick="setTheme('cyan')" class="w-5 h-5 rounded-full bg-sky-400 hover:scale-110 transition-transform ring-2 ring-transparent ring-offset-1 ring-offset-slate-900/80" title="Modrá" aria-label="Modré téma" aria-pressed="true"></button>
+          <button data-theme-button="emerald" onclick="setTheme('emerald')" class="w-5 h-5 rounded-full bg-emerald-400 hover:scale-110 transition-transform ring-2 ring-transparent ring-offset-1 ring-offset-slate-900/80" title="Smaragdová" aria-label="Smaragdové téma" aria-pressed="false"></button>
+          <button data-theme-button="purple" onclick="setTheme('purple')" class="w-5 h-5 rounded-full bg-purple-400 hover:scale-110 transition-transform ring-2 ring-transparent ring-offset-1 ring-offset-slate-900/80" title="Fialová" aria-label="Fialové téma" aria-pressed="false"></button>
         </div>
 
         <div id="espBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-semibold text-slate-400 transition-all">
@@ -455,11 +460,22 @@
 
     const $ = id => document.getElementById(id);
 
+    function applyThemeButtonState(theme) {
+      document.querySelectorAll('[data-theme-button]').forEach(button => {
+        const active = button.dataset.themeButton === theme;
+        button.classList.toggle('ring-sky-300', active);
+        button.classList.toggle('ring-white/80', active);
+        button.classList.toggle('ring-transparent', !active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    }
+
     // Dynamic Theme Manager
     function setTheme(theme) {
       const root = document.documentElement;
       root.setAttribute('data-theme', theme);
       if ($('themeSelect')) $('themeSelect').value = theme;
+      applyThemeButtonState(theme);
       if(chart) {
         const styles = getComputedStyle(root);
         const accent = styles.getPropertyValue('--color-accent').trim();
@@ -644,11 +660,18 @@
 
     function openSettings() { $('settingsModal').classList.remove('hidden'); $('settingsModal').classList.add('flex'); }
     function closeSettings(event) { if (!event || event.target === $('settingsModal')) { $('settingsModal').classList.add('hidden'); $('settingsModal').classList.remove('flex'); } }
+    function applyMotionSettings(settings) {
+      const backgroundMotion = settings.backgroundMotion !== false;
+      const cardMotion = settings.cardMotion !== false;
+      document.body.classList.toggle('background-motion-disabled', !backgroundMotion);
+      document.body.classList.toggle('reduced-motion', !cardMotion);
+      $('bubblesContainer').style.display = backgroundMotion ? '' : 'none';
+    }
+
     function saveAppSettings() {
       const settings = { host: $('host').value, user: $('user').value, pass: $('rememberPass').checked ? $('pass').value : '', interval: $('intervalSlider').value, rememberPass: $('rememberPass').checked, backgroundMotion: $('backgroundMotion').checked, cardMotion: $('cardMotion').checked, theme: $('themeSelect').value };
       localStorage.setItem(storageKey, JSON.stringify(settings));
-      document.body.classList.toggle('reduced-motion', !settings.cardMotion);
-      $('bubblesContainer').style.display = settings.backgroundMotion ? '' : 'none';
+      applyMotionSettings(settings);
     }
     function loadAppSettings() {
       try {
@@ -660,8 +683,7 @@
         $('cardMotion').checked = settings.cardMotion !== false;
         $('themeSelect').value = settings.theme || localStorage.getItem(storageKey + '-theme') || 'cyan';
         setTheme($('themeSelect').value);
-        document.body.classList.toggle('reduced-motion', !$('cardMotion').checked);
-        $('bubblesContainer').style.display = $('backgroundMotion').checked ? '' : 'none';
+        applyMotionSettings({ backgroundMotion: $('backgroundMotion').checked, cardMotion: $('cardMotion').checked });
       } catch (e) { /* ignore corrupted local preferences */ }
     }
     function clearSavedSettings() { localStorage.removeItem(storageKey); localStorage.removeItem(storageKey + '-theme'); location.reload(); }
