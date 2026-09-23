@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="cs" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Akvárko Control – Ultimate Dashboard</title>
+  <meta name="theme-color" content="#07131f">
+  <meta name="description" content="Plynulé ovládání a monitoring akvária přes MQTT.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon.svg">
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- MQTT.js -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            theme: {
+              accent: 'var(--color-accent)',
+              glow: 'var(--color-glow)',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      --color-accent: #38bdf8;
+      --color-glow: rgba(56, 189, 248, 0.4);
+      --bg-gradient: radial-gradient(circle at top, #0b2238 0%, #030a12 100%);
+      --motion: 1;
+    }
+
+    body {
+      background: var(--bg-gradient);
+      color: #f1f5f9;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+      background-attachment: fixed;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(120deg, rgba(56,189,248,.06), transparent 35%, rgba(45,212,191,.04));
+      animation: ambient 14s ease-in-out infinite alternate;
+      z-index: 0;
+    }
+
+    @keyframes ambient { from { opacity: .45; transform: scale(1); } to { opacity: 1; transform: scale(1.08); } }
+    
+    /* Animované bublinky na pozadí */
+    .bubbles-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .bubble {
+      position: absolute;
+      bottom: -50px;
+      background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.05));
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 50%;
+      box-shadow: inset 0 0 6px rgba(255, 255, 255, 0.3);
+      animation: rise var(--bubble-duration, 8s) infinite ease-in;
+    }
+
+    @keyframes rise {
+      0% {
+        transform: translateY(0) scale(0.8) translateX(0);
+        opacity: 0;
+      }
+      20% {
+        opacity: 0.6;
+      }
+      50% {
+        transform: translateY(-50vh) scale(1.1) translateX(20px);
+      }
+      100% {
+        transform: translateY(-105vh) scale(1) translateX(-10px);
+        opacity: 0;
+      }
+    }
+
+    /* Glassmorphism styly */
+    .glass-card {
+      background: rgba(13, 27, 42, 0.7);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 12px 32px 0 rgba(0, 0, 0, 0.37);
+      position: relative;
+      z-index: 10;
+    }
+
+    .glass-card-hover {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .glass-card-hover:hover {
+      border-color: var(--color-glow);
+      box-shadow: 0 14px 36px 0 var(--color-glow);
+    }
+
+    .reveal { animation: reveal .7s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--i, 0) * 80ms); }
+    @keyframes reveal { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+    .pulse-ring { animation: pulse-ring 2.4s ease-out infinite; }
+    @keyframes pulse-ring { 0%, 100% { box-shadow: 0 0 0 0 var(--color-glow); } 50% { box-shadow: 0 0 0 10px transparent; } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+    }
+    .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+
+    /* Vlastní stylování slideru */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: transparent;
+    }
+    input[type=range]:focus {
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      width: 100%;
+      height: 12px;
+      cursor: pointer;
+      background: #1e293b;
+      border-radius: 9999px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    input[type=range]::-webkit-slider-thumb {
+      height: 24px;
+      width: 24px;
+      border-radius: 50%;
+      background: var(--color-accent);
+      cursor: pointer;
+      -webkit-appearance: none;
+      margin-top: -6px;
+      box-shadow: 0 0 14px var(--color-accent);
+      transition: transform 0.15s ease, background-color 0.15s ease;
+    }
+    input[type=range]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+  </style>
+</head>
+<body class="p-4 md:p-8 flex flex-col items-center">
+
+  <!-- Bublinky pozadí -->
+  <div class="bubbles-container" id="bubblesContainer"></div>
+
+  <main class="w-full max-w-4xl space-y-6 relative z-10">
+    
+    <!-- Hlavička -->
+    <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2">
+      <div>
+        <h1 class="text-3xl font-extrabold tracking-tight flex items-center gap-3 bg-gradient-to-r from-sky-400 via-cyan-300 to-teal-200 bg-clip-text text-transparent">
+          <i data-lucide="waves" class="text-sky-400 w-8 h-8"></i> Akvárko Control
+        </h1>
+        <p class="text-slate-400 text-sm mt-1 flex items-center gap-2">
+          Vzdálený monitoring a řízení přes HiveMQ Cloud
+        </p>
+      </div>
+
+      <!-- Status Badges & Témeťátka -->
+      <div class="flex items-center gap-3">
+        <!-- Změna T tématu -->
+        <div class="flex items-center gap-1 bg-slate-900/80 p-1.5 rounded-full border border-slate-700/80">
+          <button onclick="setTheme('cyan')" class="w-5 h-5 rounded-full bg-sky-400 hover:scale-110 transition-transform" title="Modrá"></button>
+          <button onclick="setTheme('emerald')" class="w-5 h-5 rounded-full bg-emerald-400 hover:scale-110 transition-transform" title="Smaragdová"></button>
+          <button onclick="setTheme('purple')" class="w-5 h-5 rounded-full bg-purple-400 hover:scale-110 transition-transform" title="Fialová"></button>
+        </div>
+
+        <div id="espBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-semibold text-slate-400 transition-all">
+          <span class="w-2 h-2 rounded-full bg-slate-500" id="espDot"></span>
+          <span id="espText">ESP32 neznámo</span>
+        </div>
+        <button onclick="openSettings()" class="w-9 h-9 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-300 hover:text-white hover:border-sky-400 transition-all" title="Nastavení">
+          <i data-lucide="sliders-horizontal" class="w-4 h-4 mx-auto"></i>
+        </button>
+        <button id="installBtn" onclick="installApp()" class="hidden w-9 h-9 rounded-xl bg-sky-500 text-slate-950 hover:bg-sky-400 transition-all" title="Nainstalovat do telefonu">
+          <i data-lucide="download" class="w-4 h-4 mx-auto"></i>
+        </button>
+        <div id="mqttBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-semibold text-slate-400 transition-all">
+          <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse" id="mqttDot"></span>
+          <span id="mqttText">Odpojeno</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Karta Nastavení Připojení, Konfigurace a Souboru -->
+    <section class="glass-card rounded-2xl p-5 reveal" style="--i:0">
+      <div class="flex justify-between items-center cursor-pointer select-none" onclick="toggleConfig()">
+        <div class="flex items-center gap-2 text-slate-200 font-semibold">
+          <i data-lucide="settings-2" class="w-5 h-5 text-sky-400"></i>
+          <span>Nastavení připojení & Soubor s heslem</span>
+        </div>
+        <i data-lucide="chevron-down" id="configChevron" class="w-5 h-5 text-slate-400 transition-transform duration-300"></i>
+      </div>
+
+      <div id="configPanel" class="mt-4 pt-4 border-t border-slate-800 space-y-4">
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="text-xs font-medium text-slate-400 mb-1 block">HiveMQ Host</label>
+            <input id="host" value="69cc671c1cdd42848b38f5ffa21c9bf4.s1.eu.hivemq.cloud" 
+              class="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-sky-500 transition-all">
+          </div>
+          <div>
+            <label class="text-xs font-medium text-slate-400 mb-1 block">Uživatelské jméno</label>
+            <input id="user" value="ESP32" 
+              class="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-sky-500 transition-all">
+          </div>
+          <div>
+            <label class="text-xs font-medium text-slate-400 mb-1 block">Heslo</label>
+            <input id="pass" type="password" autocomplete="current-password" placeholder="Heslo z HiveMQ" 
+              class="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-sky-500 transition-all">
+            <label class="mt-2 flex items-center gap-2 text-[11px] text-slate-500"><input id="rememberPass" type="checkbox" class="accent-sky-400"> Zapamatovat heslo v tomto prohlížeči</label>
+          </div>
+        </div>
+
+        <!-- Interval grafu -->
+        <div class="pt-2 border-t border-slate-800/60">
+          <label class="text-xs font-medium text-slate-400 mb-1 flex items-center justify-between">
+            <span>Rychlost historie grafu (Heartbeat):</span>
+            <span id="intervalVal" class="text-sky-400 font-bold">10 sekund</span>
+          </label>
+          <input type="range" id="intervalSlider" min="5" max="60" step="5" value="10" oninput="updateInterval(this.value)" class="w-full cursor-pointer">
+        </div>
+
+        <!-- Práce se souborem konfigurace (Import / Export) -->
+        <div class="pt-3 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <button onclick="exportConfig()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all">
+              <i data-lucide="download" class="w-3.5 h-3.5 text-sky-400"></i> Uložit do souboru
+            </button>
+            
+            <label class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-all">
+              <i data-lucide="upload" class="w-3.5 h-3.5 text-emerald-400"></i> Načíst ze souboru
+              <input type="file" id="configFile" accept=".json" onchange="importConfig(event)" class="hidden">
+            </label>
+          </div>
+
+          <button onclick="connectMQTT()" 
+            class="w-full sm:w-auto bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-6 py-2 rounded-xl transition-all shadow-lg shadow-sky-500/20 active:scale-95 flex items-center justify-center gap-2">
+            <i data-lucide="plug" class="w-4 h-4"></i> Připojit
+          </button>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Hlavní Dashboard Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      
+      <!-- KARTA 1: Čerpadlo -->
+      <div class="glass-card glass-card-hover rounded-2xl p-6 flex flex-col justify-between reveal pulse-ring" style="--i:1">
+        <div>
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-lg font-bold text-slate-200 flex items-center gap-2">
+              <i data-lucide="gauge" class="w-5 h-5 text-sky-400"></i> Výkon čerpadla
+            </h2>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-400 border border-sky-500/20">Aktivní řízení</span>
+          </div>
+          
+          <div class="text-5xl font-black text-slate-100 tracking-tight my-2" id="pct">-- %</div>
+        </div>
+
+        <div class="space-y-4 mt-6">
+          <input class="w-full cursor-pointer" type="range" min="0" max="100" value="50" id="slider" oninput="setPump(this.value)">
+          
+          <div class="grid grid-cols-3 gap-2">
+            <button onclick="setPump(0)" class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold py-2 rounded-xl transition-all active:scale-95">STOP</button>
+            <button onclick="setPump(50)" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold py-2 rounded-xl transition-all active:scale-95">50 %</button>
+            <button onclick="setPump(100)" class="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold py-2 rounded-xl transition-all shadow-lg shadow-sky-500/20 active:scale-95">MAX</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- KARTA 2: Průtok -->
+      <div class="glass-card glass-card-hover rounded-2xl p-6 flex flex-col justify-between reveal" style="--i:2">
+        <div>
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-lg font-bold text-slate-200 flex items-center gap-2">
+              <i data-lucide="droplets" class="w-5 h-5 text-cyan-400"></i> Aktuální průtok
+            </h2>
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-md bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">Telemetrie</span>
+          </div>
+          
+          <div class="text-5xl font-black text-slate-100 tracking-tight my-2" id="flow">-- l/h</div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-slate-900/50 border border-slate-800/80 flex items-center gap-3 mt-6">
+          <i data-lucide="activity" class="w-5 h-5 text-sky-400 shrink-0"></i>
+          <p class="text-xs text-slate-400">Rychlost proudění a množství bublinek reagují na zatížení čerpadla.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- KARTA 3: Graf historie -->
+    <section class="glass-card rounded-2xl p-6 reveal" style="--i:3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+        <h2 class="text-lg font-bold text-slate-200 flex items-center gap-2">
+          <i data-lucide="line-chart" class="w-5 h-5 text-sky-400"></i> Historie výkonu
+        </h2>
+        
+        <div class="flex items-center gap-3 text-xs text-slate-400">
+          <span class="flex items-center gap-1.5">
+            <i data-lucide="heart-pulse" id="heartIcon" class="w-4 h-4 text-rose-500 transition-transform duration-300"></i>
+            <span>Rychlost: <strong id="heartbeatLabel" class="text-sky-400">10s</strong></span>
+          </span>
+          <button onclick="clearChart()" class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 transition-all">Smazat graf</button>
+        </div>
+      </div>
+
+      <div class="h-64 w-full relative">
+        <canvas id="chart"></canvas>
+      </div>
+    </section>
+
+    <!-- KARTA 4: Historický Log hodnot -->
+    <section class="glass-card rounded-2xl p-5 reveal" style="--i:4">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-slate-300 font-semibold text-sm flex items-center gap-2">
+          <i data-lucide="history" class="w-4 h-4 text-sky-400"></i> Poslední zaznamenané hodnota
+        </span>
+        <span class="text-[10px] text-slate-500">Max 10 položek</span>
+      </div>
+      <div id="logTable" class="space-y-1.5 text-xs font-mono">
+        <div class="text-slate-500 italic py-2 text-center">Zatím žádná data k zobrazení...</div>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="settingsModal" class="hidden fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm p-4 items-center justify-center" onclick="closeSettings(event)">
+    <section class="glass-card rounded-2xl p-6 w-full max-w-md" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between mb-5"><h2 class="text-lg font-bold">Nastavení aplikace</h2><button onclick="closeSettings()" class="text-slate-400 hover:text-white" title="Zavřít"><i data-lucide="x"></i></button></div>
+      <div class="space-y-4 text-sm">
+        <label class="flex items-center justify-between gap-4"><span>Animované pozadí</span><input id="backgroundMotion" type="checkbox" checked class="accent-sky-400" onchange="saveAppSettings()"></label>
+        <label class="flex items-center justify-between gap-4"><span>Jemné animace karet</span><input id="cardMotion" type="checkbox" checked class="accent-sky-400" onchange="saveAppSettings()"></label>
+        <label class="flex items-center justify-between gap-4"><span>Výchozí téma</span><select id="themeSelect" onchange="setTheme(this.value); saveAppSettings()" class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1"><option value="cyan">Cyan</option><option value="emerald">Emerald</option><option value="purple">Purple</option></select></label>
+        <button onclick="clearSavedSettings()" class="w-full mt-2 border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 rounded-xl py-2 transition-all">Vymazat uložená data</button>
+        <p class="text-[11px] text-slate-500">Heslo zůstává pouze v tomto prohlížeči a nikdy se nepřidává do exportovaného souboru.</p>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    lucide.createIcons();
+
+    let client = null;
+    let chart = null;
+    let currentPumpVal = 0;
+    let currentFlowVal = 0;
+    let heartbeatTimer = null;
+    let recordInterval = 10000; 
+    let historyLogs = [];
+    const maxDataPoints = 40;
+    let deferredInstallPrompt = null;
+    const storageKey = 'akvarko-dashboard-v2';
+
+    const $ = id => document.getElementById(id);
+
+    // Dynamic Theme Manager
+    function setTheme(theme) {
+      const root = document.documentElement;
+      if (theme === 'cyan') {
+        root.style.setProperty('--color-accent', '#38bdf8');
+        root.style.setProperty('--color-glow', 'rgba(56, 189, 248, 0.4)');
+      } else if (theme === 'emerald') {
+        root.style.setProperty('--color-accent', '#34d399');
+        root.style.setProperty('--color-glow', 'rgba(52, 211, 153, 0.4)');
+      } else if (theme === 'purple') {
+        root.style.setProperty('--color-accent', '#c084fc');
+        root.style.setProperty('--color-glow', 'rgba(192, 132, 252, 0.4)');
+      }
+      if(chart) {
+        chart.data.datasets[0].borderColor = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim();
+        chart.update();
+      }
+      localStorage.setItem(storageKey + '-theme', theme);
+    }
+
+    // Generator Bublinek na pozadí
+    function initBubbles() {
+      const container = $('bubblesContainer');
+      container.innerHTML = '';
+      const bubbleCount = 20;
+
+      for (let i = 0; i < bubbleCount; i++) {
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        
+        const size = Math.random() * 18 + 8; // Size 8px - 26px
+        bubble.style.width = size + 'px';
+        bubble.style.height = size + 'px';
+        bubble.style.left = Math.random() * 100 + '%';
+        
+        // Rychlost bublinek závislá na výkonu čerpadla
+        updateBubbleSpeed(bubble);
+
+        container.appendChild(bubble);
+      }
+    }
+
+    function updateBubbleSpeed(bubble) {
+      const baseDuration = Math.random() * 6 + 6;
+      // Čím vyšší výkon, tím rychlejší výstup
+      const factor = currentPumpVal > 0 ? (105 - currentPumpVal) / 100 : 2;
+      bubble.style.setProperty('--bubble-duration', (baseDuration * factor) + 's');
+      bubble.style.animationDelay = (Math.random() * 5) + 's';
+    }
+
+    function syncAllBubbles() {
+      const bubbles = document.querySelectorAll('.bubble');
+      bubbles.forEach(b => updateBubbleSpeed(b));
+    }
+
+    // Rozbalení konfiguračního menu
+    function toggleConfig() {
+      $('configPanel').classList.toggle('hidden');$('configChevron').classList.toggle('rotate-180');
+    }
+
+    function updateInterval(val) {
+      $('intervalVal').textContent = val + ' sekund';$('heartbeatLabel').textContent = val + 's';
+      recordInterval = parseInt(val) * 1000;
+      startHeartbeat();
+    }
+
+    // EXPORT & IMPORT NASTAVENÍ A HESLA
+    function exportConfig() {
+      const config = {
+        host: $('host').value,
+        user: $('user').value,
+        interval: $('intervalSlider').value
+      };
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(config, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", "akvarko_config.json");
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    function importConfig(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const config = JSON.parse(e.target.result);
+          if (config.host) $('host').value = config.host;
+          if (config.user) $('user').value = config.user;
+          if (config.pass) $('pass').value = config.pass;
+          if (config.interval) {
+            $('intervalSlider').value = config.interval;
+            updateInterval(config.interval);
+          }
+          alert('Konfigurace byla úspěšně načtena ze souboru!');
+        } catch (err) {
+          alert('Chyba při čtení souboru konfigurace.');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // Inicializace Chart.js
+    function initChart() {
+      const ctx = $('chart').getContext('2d');
+      const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim() || '#38bdf8';
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Výkon čerpadla (%)',
+            data: [],
+            borderColor: accentColor,
+            borderWidth: 2.5,
+            fill: false,
+            tension: 0.35,
+            pointRadius: 3,
+            pointHoverRadius: 7
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 200 },
+          scales: {
+            x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748b' } },
+            y: { min: 0, max: 100, grid: { color: 'rgba(255, 255, 255, 0.08)' }, ticks: { color: '#64748b' } }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+
+      startHeartbeat();
+    }
+
+    function pushDataToChart(value) {
+      const timeLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      
+      chart.data.labels.push(timeLabel);
+      chart.data.datasets[0].data.push(value);
+
+      if (chart.data.labels.length > maxDataPoints) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+      }
+
+      chart.update();
+
+      // Přidat do logu historie
+      addHistoryLog(timeLabel, value, currentFlowVal);
+
+      // Srdcový tep ikona
+      const icon = $('heartIcon');
+      if (icon) {
+        icon.classList.add('scale-150', 'text-rose-400');
+        setTimeout(() => icon.classList.remove('scale-150', 'text-rose-400'), 300);
+      }
+    }
+
+    function addHistoryLog(time, pct, flow) {
+      historyLogs.unshift({ time, pct, flow });
+      if (historyLogs.length > 10) historyLogs.pop();
+
+      const logContainer = $('logTable');
+      logContainer.innerHTML = historyLogs.map(item => `
+        <div class="flex justify-between items-center p-2 rounded-lg bg-slate-900/40 border border-slate-800/60">
+          <span class="text-slate-400">${item.time}</span>
+          <span class="text-sky-300 font-bold">Výkon: ${item.pct} %</span>
+          <span class="text-cyan-400">Průtok: ${item.flow} l/h</span>
+        </div>
+      `).join('');
+    }
+
+    function clearChart() {
+      chart.data.labels = [];
+      chart.data.datasets[0].data = [];
+      chart.update();
+      historyLogs = [];
+      $('logTable').innerHTML = '<div class="text-slate-500 italic py-2 text-center">Historie byla vymazána.</div>';
+    }
+
+    function openSettings() { $('settingsModal').classList.remove('hidden'); $('settingsModal').classList.add('flex'); }
+    function closeSettings(event) { if (!event || event.target === $('settingsModal')) { $('settingsModal').classList.add('hidden'); $('settingsModal').classList.remove('flex'); } }
+    function saveAppSettings() {
+      const settings = { host: $('host').value, user: $('user').value, pass: $('rememberPass').checked ? $('pass').value : '', interval: $('intervalSlider').value, rememberPass: $('rememberPass').checked, backgroundMotion: $('backgroundMotion').checked, cardMotion: $('cardMotion').checked, theme: $('themeSelect').value };
+      localStorage.setItem(storageKey, JSON.stringify(settings));
+      document.body.classList.toggle('reduced-motion', !settings.cardMotion);
+      $('bubblesContainer').style.display = settings.backgroundMotion ? '' : 'none';
+    }
+    function loadAppSettings() {
+      try {
+        const settings = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        ['host', 'user'].forEach(id => { if (settings[id]) $(id).value = settings[id]; });
+        if (settings.rememberPass) { $('pass').value = settings.pass || ''; $('rememberPass').checked = true; }
+        if (settings.interval) { $('intervalSlider').value = settings.interval; updateInterval(settings.interval); }
+        $('backgroundMotion').checked = settings.backgroundMotion !== false;
+        $('cardMotion').checked = settings.cardMotion !== false;
+        $('themeSelect').value = settings.theme || localStorage.getItem(storageKey + '-theme') || 'cyan';
+        setTheme($('themeSelect').value);
+        document.body.classList.toggle('reduced-motion', !$('cardMotion').checked);
+        $('bubblesContainer').style.display = $('backgroundMotion').checked ? '' : 'none';
+      } catch (e) { /* ignore corrupted local preferences */ }
+    }
+    function clearSavedSettings() { localStorage.removeItem(storageKey); localStorage.removeItem(storageKey + '-theme'); location.reload(); }
+
+    function installApp() { if (deferredInstallPrompt) { deferredInstallPrompt.prompt(); deferredInstallPrompt = null; $('installBtn').classList.add('hidden'); } }
+
+    function startHeartbeat() {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = setInterval(() => pushDataToChart(currentPumpVal), recordInterval);
+    }
+
+    function setMqttStatus(text, state = 'disconnected') {
+      const dot = $('mqttDot');$('mqttText').textContent = text;
+      dot.className = state === 'connected' ? 'w-2 h-2 rounded-full bg-emerald-400' : 
+                      state === 'connecting' ? 'w-2 h-2 rounded-full bg-amber-400 animate-ping' : 
+                      'w-2 h-2 rounded-full bg-rose-500';
+    }
+
+    function setEspStatus(isOnline) {
+      $('espText').textContent = isOnline ? 'ESP32 Online' : 'ESP32 Offline';
+      $('espText').className = isOnline ? 'text-emerald-400' : 'text-rose-400';
+      $('espDot').className = isOnline ? 'w-2 h-2 rounded-full bg-emerald-400' : 'w-2 h-2 rounded-full bg-rose-500';
+    }
+
+    function connectMQTT() {
+      if (client) try { client.end(true); } catch (e) {}
+
+      const host = $('host').value.trim();
+      const user = $('user').value.trim();
+      const pass = $('pass').value;
+
+      saveAppSettings();
+
+      if (!host || !user || !pass) {
+        alert('Vyplňte prosím přihlašovací údaje.');
+        return;
+      }
+
+      setMqttStatus('Připojování...', 'connecting');
+
+      client = mqtt.connect('wss://' + host + ':8884/mqtt', {
+        username: user,
+        password: pass,
+        clientId: 'web-' + Math.random().toString(16).slice(2),
+        clean: true,
+        reconnectPeriod: 3000
+      });
+
+      client.on('connect', () => {
+        setMqttStatus('Online', 'connected');
+        client.subscribe('akvarium/cerpadlo/state');
+        client.subscribe('akvarium/status');
+      });
+
+      client.on('message', (topic, payload) => {
+        const s = payload.toString();
+        if (topic === 'akvarium/status') {
+          setEspStatus(s === 'online');
+          return;
+        }
+
+        if (topic === 'akvarium/cerpadlo/state') {
+          try {
+            const d = JSON.parse(s);
+            $('pct').textContent = d.percent + ' %';
+            $('flow').textContent = d.flow + ' l/h';$('slider').value = d.percent;
+            
+            currentPumpVal = d.percent;
+            currentFlowVal = d.flow;
+
+            syncAllBubbles();
+          } catch (e) {}
+        }
+      });
+
+      client.on('error', () => setMqttStatus('Chyba MQTT', 'error'));
+      client.on('close', () => setMqttStatus('Odpojeno', 'error'));
+    }
+
+    function setPump(v) {
+      currentPumpVal = parseInt(v);
+      $('pct').textContent = v + ' \%';$('slider').value = v;
+
+      syncAllBubbles();
+      pushDataToChart(currentPumpVal);
+
+      if (client && client.connected) {
+        client.publish('akvarium/cerpadlo/set', String(v), { qos: 1 });
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initBubbles();
+      initChart();
+      loadAppSettings();
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+
+    window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); deferredInstallPrompt = event; $('installBtn').classList.remove('hidden'); });
+  </script>
+</body>
+</html>
