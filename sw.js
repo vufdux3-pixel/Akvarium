@@ -1,6 +1,6 @@
-const CACHE_NAME = 'akvarko-control-v1';
+const CACHE_NAME = 'akvarko-ovladač';
 const APP_SHELL = [
-  './gemini-code-1790184575603.html',
+  './index.html',
   './manifest.webmanifest',
   './icon.svg'
 ];
@@ -26,6 +26,6 @@ self.addEventListener('fetch', event => {
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
       }
       return response;
-    }).catch(() => caches.match('./gemini-code-1790184575603.html')))
+    }).catch(() => caches.match('./index.html')))
   );
 });
