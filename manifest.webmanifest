@@ -2,7 +2,7 @@
   "name": "Akvárko ovladač",
   "short_name": "Akvárko",
   "lang": "cs",
-  "start_url": "./gemini-code-1790184575603.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#030a12",
   "theme_color": "#07131f",
